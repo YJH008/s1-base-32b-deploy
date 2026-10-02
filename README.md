@@ -31,8 +31,8 @@
 1. **模型原生上下文上限 131072（128K）**：`max_position_embeddings: 131072`，实测 130772 token 输入成功处理。
 2. **KV cache 与显存关系**：权重每卡占 30.61GiB，剩余才可用于 KV cache。0.85 利用率下 KV cache 池为 252,624 tokens。
 3. **排队不崩溃**：vLLM V1 调度器原生排队，实测 8 路×59488 token 并发（总需求 47.5万 token 远超池子）全部返回 200，无 OOM。
-4. **工具调用未开启**：模型无 tool-calling 微调，且 vLLM 未加 `--enable-auto-tool-choice`。S1-Base 定位为科学推理，不适合 tool call。
-5. **思考无法关闭**：S1-Base 的思考是训练固化的自定义格式（` thinking` 文本标记），`enable_thinking=false` 无效，无 `reasoning_content` 独立字段。
+4. **工具调用**：S1-Base 无 tool-calling 微调，模型不会产出 `tool_calls`（实测返回空数组）。但必须加 `--enable-auto-tool-choice --tool-call-parser hermes`，否则 vLLM 遇到带 `tools` 的请求会直接报 400，导致 WorkBuddy 等框架无法接入。
+5. **思考无法关闭**：S1-Base 的思考是训练固化的自定义格式（` thinking` 文本标记，token id 151667），`enable_thinking=false` 无效，无 `reasoning_content` 独立字段。
 
 ## 三、拉起命令（最终版）
 
@@ -51,7 +51,9 @@ docker run -d \
   --dtype bfloat16 \
   --tensor-parallel-size 2 \
   --max-model-len 131072 \
-  --gpu-memory-utilization 0.85
+  --gpu-memory-utilization 0.85 \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes
 ```
 
 ### 参数说明
@@ -68,6 +70,8 @@ docker run -d \
 | --tensor-parallel-size | 2 | 双卡张量并行 |
 | --max-model-len | 131072 | 最大上下文 128K |
 | --gpu-memory-utilization | 0.85 | 显存利用率（留 15% 防 OOM 安全垫） |
+| --enable-auto-tool-choice | - | 允许 `tool_choice: auto`（WorkBuddy 等框架接入必需） |
+| --tool-call-parser | hermes | 工具调用解析器（Qwen3 系推荐 hermes） |
 
 ## 四、启动 / 停止 / 重启
 
@@ -155,3 +159,28 @@ curl -s http://10.33.19.172:10090/v1/chat/completions \
 | 130,772 token 长输入 | ✅ 成功（接近 128K 上限） |
 | 131,063 token | ⚠️ 400（超出 131072 上限，正常拒绝） |
 | 8 路 × 59488 token 并发 | ✅ 全部 200，排队不崩溃 |
+
+## 八、工具调用与 WorkBuddy 接入
+
+### 8.1 为什么必须加工具调用参数
+
+S1-Base-32B 定位为科学推理模型，**本身无 tool-calling 微调**，即使传入 `tools` 也不会真正产出 `tool_calls`（实测返回空数组）。
+
+但如果不加 `--enable-auto-tool-choice --tool-call-parser hermes` 这两个参数，vLLM 遇到带 `tools` 的请求会**直接返回 400 错误**（`"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`）。
+
+WorkBuddy 等 AI 框架发起请求时默认会携带 tool 定义，因此**不加参数会导致接入失败**；加上后请求正常返回 200，对话功能可用。
+
+### 8.2 能力边界
+
+| 场景 | 是否可用 |
+|------|---------|
+| 普通对话 / 问答 / 科学推理 | ✅ 正常 |
+| 模型主动调用外部工具 | ❌ 不支持（退化文字回答） |
+
+> 如需模型主动调用工具（如联网搜索、查天气），需改用原生支持 function calling 的模型（如 Qwen3-32B-Instruct）。
+
+### 8.3 WorkBuddy 配置
+
+模型地址：`http://10.33.19.172:10090/v1`
+模型名：`S1-Base-32B`
+接口格式：OpenAI 兼容（chat/completions）
