@@ -24,7 +24,9 @@ run_container() {
       --dtype bfloat16 \
       --tensor-parallel-size 2 \
       --max-model-len 131072 \
-      --gpu-memory-utilization 0.85
+      --gpu-memory-utilization 0.85 \
+      --enable-auto-tool-choice \
+      --tool-call-parser hermes
 }
 
 case "$1" in
