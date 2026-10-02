@@ -178,9 +178,3 @@ WorkBuddy 等 AI 框架发起请求时默认会携带 tool 定义，因此**不�
 | 模型主动调用外部工具 | ❌ 不支持（退化文字回答） |
 
 > 如需模型主动调用工具（如联网搜索、查天气），需改用原生支持 function calling 的模型（如 Qwen3-32B-Instruct）。
-
-### 8.3 WorkBuddy 配置
-
-模型地址：`http://10.33.19.172:10090/v1`
-模型名：`S1-Base-32B`
-接口格式：OpenAI 兼容（chat/completions）
